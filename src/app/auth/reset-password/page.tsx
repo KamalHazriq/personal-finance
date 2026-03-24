@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { resetPassword } from "@/lib/actions/auth";
+import { useAuth } from "@/lib/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,9 +17,11 @@ import {
 
 export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
+  const { resetPassword } = useAuth();
+  const router = useRouter();
 
-  function handleSubmit(formData: FormData) {
+  async function handleSubmit(formData: FormData) {
     setError(null);
 
     const password = formData.get("password") as string;
@@ -34,12 +37,16 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    startTransition(async () => {
-      const result = await resetPassword(formData);
-      if (result?.error) {
-        setError(result.error);
-      }
-    });
+    setIsPending(true);
+
+    const result = await resetPassword(password);
+
+    if (result.error) {
+      setError(result.error);
+      setIsPending(false);
+    } else {
+      router.push("/dashboard/");
+    }
   }
 
   return (

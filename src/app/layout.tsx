@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/layout/theme-provider";
+import { AuthProvider } from "@/lib/hooks/use-auth";
+import { AuthGuard } from "@/components/layout/auth-guard";
 import "./globals.css";
 
 const inter = Inter({
@@ -27,7 +29,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <AuthProvider>
+            <AuthGuard>{children}</AuthGuard>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

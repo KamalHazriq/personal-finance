@@ -1,49 +1,53 @@
-"use server";
-
-import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/client";
 import type { MonthlyAccountValue, MonthlySnapshot } from "@/types/database";
 
-/**
- * Get all monthly values for a specific month
- */
-export async function getMonthlyValues(monthDate: string): Promise<MonthlyAccountValue[]> {
-  const supabase = await createClient();
+// ─── Monthly Account Values ─────────────────────────────
+
+export async function getMonthlyValues(
+  monthDate: string
+): Promise<MonthlyAccountValue[]> {
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("monthly_account_values")
-    .select("*, account:accounts(*, category:account_categories(*))")
+    .select("*, account:accounts(*)")
     .eq("month_date", monthDate)
     .order("created_at", { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("getMonthlyValues error:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
-/**
- * Get monthly values for two months (current and previous) for comparison
- */
 export async function getMonthlyValuesWithPrevious(
   monthDate: string,
-  previousMonthDate: string
+  prevMonthDate: string
 ): Promise<{
   current: MonthlyAccountValue[];
   previous: MonthlyAccountValue[];
 }> {
-  const supabase = await createClient();
+  const supabase = createClient();
 
   const [currentResult, previousResult] = await Promise.all([
     supabase
       .from("monthly_account_values")
-      .select("*")
-      .eq("month_date", monthDate),
+      .select("*, account:accounts(*)")
+      .eq("month_date", monthDate)
+      .order("created_at", { ascending: true }),
     supabase
       .from("monthly_account_values")
-      .select("*")
-      .eq("month_date", previousMonthDate),
+      .select("*, account:accounts(*)")
+      .eq("month_date", prevMonthDate)
+      .order("created_at", { ascending: true }),
   ]);
 
-  if (currentResult.error) throw new Error(currentResult.error.message);
-  if (previousResult.error) throw new Error(previousResult.error.message);
+  if (currentResult.error) {
+    console.error("getMonthlyValuesWithPrevious current error:", currentResult.error.message);
+  }
+  if (previousResult.error) {
+    console.error("getMonthlyValuesWithPrevious previous error:", previousResult.error.message);
+  }
 
   return {
     current: currentResult.data ?? [],
@@ -51,66 +55,64 @@ export async function getMonthlyValuesWithPrevious(
   };
 }
 
-/**
- * Save monthly values in bulk (upsert).
- * This is the core function for the Monthly Update page.
- */
 export async function saveMonthlyValues(
   monthDate: string,
-  entries: { accountId: string; value: number; notes?: string }[]
-) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  entries: { accountId: string; value: number }[]
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Build upsert payload
-  const records = entries.map((entry) => ({
+  // Upsert all entries
+  const rows = entries.map((entry) => ({
     user_id: user.id,
     account_id: entry.accountId,
     month_date: monthDate,
     value: entry.value,
     source: "manual" as const,
-    notes: entry.notes || null,
   }));
 
   const { error } = await supabase
     .from("monthly_account_values")
-    .upsert(records, {
+    .upsert(rows, {
       onConflict: "user_id,account_id,month_date",
     });
 
   if (error) return { error: error.message };
 
-  // Recalculate snapshot for this month
-  await recalculateSnapshot(monthDate);
+  // Recalculate snapshot after saving
+  const snapshotResult = await recalculateSnapshot(monthDate);
+  if (snapshotResult.error) {
+    console.error("Snapshot recalculation error:", snapshotResult.error);
+  }
 
-  revalidatePath("/monthly-update");
-  revalidatePath("/dashboard");
-  revalidatePath("/history");
-  return { success: true };
+  return {};
 }
 
-/**
- * Copy values from one month to another
- */
 export async function copyPreviousMonthValues(
   sourceMonth: string,
   targetMonth: string
-) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+): Promise<{ error?: string; copied?: number }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Get source month values
+  // Fetch source month values
   const { data: sourceValues, error: fetchError } = await supabase
     .from("monthly_account_values")
-    .select("account_id, value, notes")
+    .select("account_id, value")
     .eq("month_date", sourceMonth)
     .eq("user_id", user.id);
 
   if (fetchError) return { error: fetchError.message };
   if (!sourceValues || sourceValues.length === 0) {
-    return { error: "No values found for the source month" };
+    return { error: "No values found for previous month" };
   }
 
   // Check which accounts already have values in target month
@@ -121,109 +123,100 @@ export async function copyPreviousMonthValues(
     .eq("user_id", user.id);
 
   const existingAccountIds = new Set(
-    (existingValues ?? []).map((v) => v.account_id)
+    (existingValues ?? []).map((v: { account_id: string }) => v.account_id)
   );
 
   // Only copy values for accounts that don't already have target month values
-  const newRecords = sourceValues
-    .filter((v) => !existingAccountIds.has(v.account_id))
-    .map((v) => ({
+  const newRows = sourceValues
+    .filter((v: { account_id: string }) => !existingAccountIds.has(v.account_id))
+    .map((v: { account_id: string; value: number }) => ({
       user_id: user.id,
       account_id: v.account_id,
       month_date: targetMonth,
       value: v.value,
       source: "manual" as const,
-      notes: null,
     }));
 
-  if (newRecords.length === 0) {
-    return { error: "All accounts already have values for the target month" };
+  if (newRows.length === 0) {
+    return { copied: 0 };
   }
 
   const { error: insertError } = await supabase
     .from("monthly_account_values")
-    .insert(newRecords);
+    .insert(newRows);
 
   if (insertError) return { error: insertError.message };
 
-  revalidatePath("/monthly-update");
-  return { success: true, copied: newRecords.length };
+  // Recalculate snapshot after copying
+  const snapshotResult = await recalculateSnapshot(targetMonth);
+  if (snapshotResult.error) {
+    console.error("Snapshot recalculation error:", snapshotResult.error);
+  }
+
+  return { copied: newRows.length };
 }
 
-/**
- * Recalculate the monthly snapshot for a given month.
- * Calls the database function.
- */
-export async function recalculateSnapshot(monthDate: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
+// ─── Snapshots ──────────────────────────────────────────
+
+export async function recalculateSnapshot(
+  monthDate: string
+): Promise<{ error?: string }> {
+  const supabase = createClient();
 
   const { error } = await supabase.rpc("recalculate_snapshot", {
-    p_user_id: user.id,
-    p_month_date: monthDate,
+    target_month: monthDate,
   });
 
-  if (error) {
-    console.error("Snapshot recalculation failed:", error.message);
-    return { error: error.message };
-  }
-
-  revalidatePath("/dashboard");
-  revalidatePath("/history");
-  return { success: true };
+  if (error) return { error: error.message };
+  return {};
 }
 
-/**
- * Get all monthly snapshots for charting and history
- */
 export async function getSnapshots(
-  limit?: number
+  limit: number = 24
 ): Promise<MonthlySnapshot[]> {
-  const supabase = await createClient();
-  let query = supabase
+  const supabase = createClient();
+  const { data, error } = await supabase
     .from("monthly_snapshots")
     .select("*")
-    .order("month_date", { ascending: true });
+    .order("month_date", { ascending: false })
+    .limit(limit);
 
-  if (limit) {
-    query = query.limit(limit);
+  if (error) {
+    console.error("getSnapshots error:", error.message);
+    return [];
   }
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
   return data ?? [];
 }
 
-/**
- * Get the latest snapshot
- */
 export async function getLatestSnapshot(): Promise<MonthlySnapshot | null> {
-  const supabase = await createClient();
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("monthly_snapshots")
     .select("*")
     .order("month_date", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (error && error.code !== "PGRST116") throw new Error(error.message);
+  if (error) {
+    console.error("getLatestSnapshot error:", error.message);
+    return null;
+  }
   return data;
 }
 
-/**
- * Get snapshot for a specific month
- */
 export async function getSnapshotForMonth(
   monthDate: string
 ): Promise<MonthlySnapshot | null> {
-  const supabase = await createClient();
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("monthly_snapshots")
     .select("*")
     .eq("month_date", monthDate)
-    .single();
+    .maybeSingle();
 
-  if (error && error.code !== "PGRST116") throw new Error(error.message);
+  if (error) {
+    console.error("getSnapshotForMonth error:", error.message);
+    return null;
+  }
   return data;
 }

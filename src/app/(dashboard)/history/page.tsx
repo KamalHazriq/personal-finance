@@ -1,8 +1,43 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getSnapshots } from "@/lib/actions/monthly-values";
 import { HistoryView } from "@/components/charts/history-view";
+import type { MonthlySnapshot } from "@/types/database";
 
-export default async function HistoryPage() {
-  const snapshots = await getSnapshots();
+function HistorySkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="mt-1 h-4 w-64" />
+      </div>
+      <Skeleton className="h-80 w-full rounded-xl" />
+      <Skeleton className="h-64 w-full rounded-xl" />
+    </div>
+  );
+}
+
+export default function HistoryPage() {
+  const [snapshots, setSnapshots] = useState<MonthlySnapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const data = await getSnapshots();
+        setSnapshots(data);
+      } catch (err) {
+        console.error("Failed to fetch history data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  if (loading) return <HistorySkeleton />;
 
   return (
     <div className="space-y-6">

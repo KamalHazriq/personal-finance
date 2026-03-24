@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { forgotPassword } from "@/lib/actions/auth";
+import { useAuth } from "@/lib/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,19 +18,24 @@ import {
 export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
+  const { forgotPassword } = useAuth();
 
-  function handleSubmit(formData: FormData) {
+  async function handleSubmit(formData: FormData) {
     setError(null);
     setSuccess(null);
-    startTransition(async () => {
-      const result = await forgotPassword(formData);
-      if (result?.error) {
-        setError(result.error);
-      } else if (result?.success) {
-        setSuccess(result.success);
-      }
-    });
+    setIsPending(true);
+
+    const email = formData.get("email") as string;
+    const result = await forgotPassword(email);
+
+    if (result.error) {
+      setError(result.error);
+    } else if (result.success) {
+      setSuccess(result.success);
+    }
+
+    setIsPending(false);
   }
 
   return (

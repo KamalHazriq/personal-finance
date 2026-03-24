@@ -1,118 +1,157 @@
-"use server";
-
-import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/client";
 import type { Goal } from "@/types/database";
 
 export async function getGoals(): Promise<Goal[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("goals")
     .select("*")
     .eq("is_archived", false)
-    .order("target_date", { ascending: true });
+    .order("created_at", { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("getGoals error:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
 export async function getAllGoals(): Promise<Goal[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("goals")
     .select("*")
-    .order("target_date", { ascending: true });
+    .order("created_at", { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("getAllGoals error:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
-export async function createGoal(formData: FormData) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+export async function createGoal(
+  formData: FormData
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  const title = formData.get("title") as string;
   const goalType = formData.get("goal_type") as string;
+  const targetValue = parseFloat(formData.get("target_value") as string);
+  const targetDate = formData.get("target_date") as string;
+  const startValue = parseFloat(formData.get("start_value") as string) || 0;
+  const startDate = formData.get("start_date") as string;
+  const targetAccountId =
+    (formData.get("target_account_id") as string) || null;
+  const targetCategoryId =
+    (formData.get("target_category_id") as string) || null;
+
+  if (!title?.trim()) return { error: "Title is required" };
+  if (!goalType) return { error: "Goal type is required" };
+  if (isNaN(targetValue)) return { error: "Target value is required" };
+  if (!targetDate) return { error: "Target date is required" };
+  if (!startDate) return { error: "Start date is required" };
+
   const { error } = await supabase.from("goals").insert({
     user_id: user.id,
-    title: formData.get("title") as string,
+    title: title.trim(),
     goal_type: goalType,
-    target_value: parseFloat(formData.get("target_value") as string),
-    target_date: formData.get("target_date") as string,
-    target_account_id: goalType === "account_value"
-      ? (formData.get("target_account_id") as string) || null
-      : null,
-    target_category_id: goalType === "category_total"
-      ? (formData.get("target_category_id") as string) || null
-      : null,
-    start_value: parseFloat(formData.get("start_value") as string) || 0,
-    start_date: formData.get("start_date") as string,
+    target_value: targetValue,
+    target_date: targetDate,
+    start_value: startValue,
+    start_date: startDate,
+    target_account_id: targetAccountId || null,
+    target_category_id: targetCategoryId || null,
   });
 
   if (error) return { error: error.message };
-  revalidatePath("/goals");
-  revalidatePath("/dashboard");
-  return { success: true };
+  return {};
 }
 
-export async function updateGoal(id: string, formData: FormData) {
-  const supabase = await createClient();
+export async function updateGoal(
+  id: string,
+  formData: FormData
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
+  const title = formData.get("title") as string;
   const goalType = formData.get("goal_type") as string;
+  const targetValue = parseFloat(formData.get("target_value") as string);
+  const targetDate = formData.get("target_date") as string;
+  const startValue = parseFloat(formData.get("start_value") as string) || 0;
+  const startDate = formData.get("start_date") as string;
+  const targetAccountId =
+    (formData.get("target_account_id") as string) || null;
+  const targetCategoryId =
+    (formData.get("target_category_id") as string) || null;
+
+  if (!title?.trim()) return { error: "Title is required" };
+  if (!goalType) return { error: "Goal type is required" };
+  if (isNaN(targetValue)) return { error: "Target value is required" };
+  if (!targetDate) return { error: "Target date is required" };
+  if (!startDate) return { error: "Start date is required" };
 
   const { error } = await supabase
     .from("goals")
     .update({
-      title: formData.get("title") as string,
+      title: title.trim(),
       goal_type: goalType,
-      target_value: parseFloat(formData.get("target_value") as string),
-      target_date: formData.get("target_date") as string,
-      target_account_id: goalType === "account_value"
-        ? (formData.get("target_account_id") as string) || null
-        : null,
-      target_category_id: goalType === "category_total"
-        ? (formData.get("target_category_id") as string) || null
-        : null,
-      start_value: parseFloat(formData.get("start_value") as string) || 0,
-      start_date: formData.get("start_date") as string,
+      target_value: targetValue,
+      target_date: targetDate,
+      start_value: startValue,
+      start_date: startDate,
+      target_account_id: targetAccountId || null,
+      target_category_id: targetCategoryId || null,
     })
     .eq("id", id);
 
   if (error) return { error: error.message };
-  revalidatePath("/goals");
-  revalidatePath("/dashboard");
-  return { success: true };
+  return {};
 }
 
-export async function archiveGoal(id: string) {
-  const supabase = await createClient();
+export async function archiveGoal(
+  id: string
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
   const { error } = await supabase
     .from("goals")
     .update({ is_archived: true })
     .eq("id", id);
 
   if (error) return { error: error.message };
-  revalidatePath("/goals");
-  revalidatePath("/dashboard");
-  return { success: true };
+  return {};
 }
 
-export async function unarchiveGoal(id: string) {
-  const supabase = await createClient();
+export async function unarchiveGoal(
+  id: string
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
   const { error } = await supabase
     .from("goals")
     .update({ is_archived: false })
     .eq("id", id);
 
   if (error) return { error: error.message };
-  revalidatePath("/goals");
-  return { success: true };
+  return {};
 }
 
-export async function deleteGoal(id: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.from("goals").delete().eq("id", id);
+export async function deleteGoal(
+  id: string
+): Promise<{ error?: string }> {
+  const supabase = createClient();
+
+  const { error } = await supabase
+    .from("goals")
+    .delete()
+    .eq("id", id);
 
   if (error) return { error: error.message };
-  revalidatePath("/goals");
-  return { success: true };
+  return {};
 }

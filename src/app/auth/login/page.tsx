@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { signIn } from "@/lib/actions/auth";
+import { useAuth } from "@/lib/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,16 +19,25 @@ import {
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
+  const { signIn } = useAuth();
+  const router = useRouter();
 
-  function handleSubmit(formData: FormData) {
+  async function handleSubmit(formData: FormData) {
     setError(null);
-    startTransition(async () => {
-      const result = await signIn(formData);
-      if (result?.error) {
-        setError(result.error);
-      }
-    });
+    setIsPending(true);
+
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+
+    const result = await signIn(email, password);
+
+    if (result.error) {
+      setError(result.error);
+      setIsPending(false);
+    } else {
+      router.push("/dashboard/");
+    }
   }
 
   return (

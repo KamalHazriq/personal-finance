@@ -1,9 +1,8 @@
-import { Suspense } from "react";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  CalendarDays,
-  History,
-} from "lucide-react";
+import { CalendarDays, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getLatestSnapshot, getSnapshots } from "@/lib/actions/monthly-values";
@@ -15,6 +14,7 @@ import { NetWorthChart } from "@/components/dashboard/net-worth-chart";
 import { ChangeCards } from "@/components/dashboard/change-cards";
 import { GoalSummary } from "@/components/dashboard/goal-summary";
 import { CategoryBreakdown } from "@/components/dashboard/category-breakdown";
+import type { MonthlySnapshot, Goal, Account, AccountCategory } from "@/types/database";
 
 function DashboardSkeleton() {
   return (
@@ -37,21 +37,43 @@ function DashboardSkeleton() {
   );
 }
 
-async function DashboardContent() {
-  const [latestSnapshot, snapshots, goals, accounts, categories] =
-    await Promise.all([
-      getLatestSnapshot(),
-      getSnapshots(),
-      getGoals(),
-      getActiveAccounts(),
-      getCategories(),
-    ]);
+export default function DashboardPage() {
+  const [latestSnapshot, setLatestSnapshot] = useState<MonthlySnapshot | null>(null);
+  const [snapshots, setSnapshots] = useState<MonthlySnapshot[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [categories, setCategories] = useState<AccountCategory[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Find the previous snapshot for MoM comparison
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [latestSnapshotData, snapshotsData, goalsData, accountsData, categoriesData] =
+          await Promise.all([
+            getLatestSnapshot(),
+            getSnapshots(),
+            getGoals(),
+            getActiveAccounts(),
+            getCategories(),
+          ]);
+        setLatestSnapshot(latestSnapshotData);
+        setSnapshots(snapshotsData);
+        setGoals(goalsData);
+        setAccounts(accountsData);
+        setCategories(categoriesData);
+      } catch (err) {
+        console.error("Failed to fetch dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  if (loading) return <DashboardSkeleton />;
+
   const previousSnapshot =
-    snapshots.length >= 2
-      ? snapshots[snapshots.length - 2]
-      : null;
+    snapshots.length >= 2 ? snapshots[snapshots.length - 2] : null;
 
   const currentMonth = latestSnapshot
     ? formatMonth(latestSnapshot.month_date)
@@ -101,13 +123,5 @@ async function DashboardContent() {
         <GoalSummary goals={goals} snapshot={latestSnapshot} />
       </div>
     </div>
-  );
-}
-
-export default function DashboardPage() {
-  return (
-    <Suspense fallback={<DashboardSkeleton />}>
-      <DashboardContent />
-    </Suspense>
   );
 }
